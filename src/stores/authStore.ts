@@ -26,14 +26,13 @@ function makeStubProfile(session: AuthSession): ProfileRow {
     id: session.userId,
     full_name: session.fullName,
     email: session.email,
-    avatar_url: null,
     monthly_income: 0,
     currency: 'VND',
     timezone: 'Asia/Ho_Chi_Minh',
     onboarding_done: false,
     created_at: now,
     updated_at: now,
-  } as ProfileRow;
+  };
 }
 
 /**
