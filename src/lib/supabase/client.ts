@@ -25,7 +25,11 @@ if (isConfigured()) {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: false,
+      // Required for password-recovery / magic-link flows: supabase-js parses
+      // the `#access_token=...&type=recovery` fragment on page load and emits
+      // a `PASSWORD_RECOVERY` event via onAuthStateChange.
+      detectSessionInUrl: true,
+      flowType: 'implicit',
       storage: typeof window !== 'undefined' ? window.localStorage : undefined,
       storageKey: 'bb:auth',
     },

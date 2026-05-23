@@ -108,13 +108,35 @@ export const SupabaseAuthRepo = {
     await supabase().auth.signOut();
   },
 
+  /**
+   * Send a password-reset email. Supabase delivers a link of the form
+   * `<redirectTo>#access_token=...&type=recovery` which, with
+   * `detectSessionInUrl: true`, fires a `PASSWORD_RECOVERY` event on load.
+   */
+  async requestPasswordReset(email: string, redirectTo?: string): Promise<void> {
+    const { error } = await supabase().auth.resetPasswordForEmail(email, {
+      redirectTo: redirectTo ?? (typeof window !== 'undefined' ? window.location.origin : undefined),
+    });
+    if (error) throw new Error(error.message);
+  },
+
+  /**
+   * Set a new password for the currently-authenticated user. During a recovery
+   * flow Supabase puts a short-lived session in place via the URL token so
+   * this call works without the user knowing their old password.
+   */
+  async updatePassword(newPassword: string): Promise<void> {
+    const { error } = await supabase().auth.updateUser({ password: newPassword });
+    if (error) throw new Error(error.message);
+  },
+
   /** Supabase manages session persistence — this is a no-op for parity with local impl. */
   persistSession(input: { userId: string; email: string; fullName: string }): AuthSession {
     return { ...input, issuedAt: new Date().toISOString() };
   },
 
-  onAuthChange(handler: (session: AuthSession | null) => void): () => void {
-    const { data } = supabase().auth.onAuthStateChange((_evt, sess) => {
+  onAuthChange(handler: (session: AuthSession | null, event?: string) => void): () => void {
+    const { data } = supabase().auth.onAuthStateChange((evt, sess) => {
       // CRITICAL: this callback runs *inside* Supabase's auth lock. If we
       // synchronously call `handler` and `handler` awaits any supabase op,
       // it will deadlock. We defer to the next macrotask so the lock is
@@ -122,7 +144,7 @@ export const SupabaseAuthRepo = {
       const next: AuthSession | null = sess?.user
         ? buildSessionFromUser(sess.user)
         : null;
-      setTimeout(() => handler(next), 0);
+      setTimeout(() => handler(next, evt), 0);
     });
     return () => data.subscription.unsubscribe();
   },

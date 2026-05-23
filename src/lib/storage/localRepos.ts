@@ -101,10 +101,18 @@ export const LocalAuthRepo = {
     session.clear();
   },
 
+  async requestPasswordReset(_email: string, _redirectTo?: string): Promise<void> {
+    throw new Error('Password reset requires Supabase. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable it.');
+  },
+
+  async updatePassword(_newPassword: string): Promise<void> {
+    throw new Error('Password reset requires Supabase. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable it.');
+  },
+
   /** Local-only helper used by the demo seed. Supabase impl is a no-op. */
   persistSession,
 
-  onAuthChange(_handler: (session: AuthSession | null) => void): () => void {
+  onAuthChange(_handler: (session: AuthSession | null, event?: string) => void): () => void {
     // BroadcastChannel-based realtime already covers cross-tab session updates
     // for the local implementation, so we don't need an explicit listener.
     return () => {};

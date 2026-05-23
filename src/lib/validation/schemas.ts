@@ -84,6 +84,22 @@ export const LoginSchema = z.object({
 });
 export type LoginInput = z.infer<typeof LoginSchema>;
 
+export const ForgotPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Enter a valid email.'),
+});
+export type ForgotPasswordInput = z.infer<typeof ForgotPasswordSchema>;
+
+export const ResetPasswordSchema = z
+  .object({
+    password: z.string().min(6, 'Password must be at least 6 characters.'),
+    confirmPassword: z.string(),
+  })
+  .refine((d) => d.password === d.confirmPassword, {
+    path: ['confirmPassword'],
+    message: 'Passwords do not match.',
+  });
+export type ResetPasswordInput = z.infer<typeof ResetPasswordSchema>;
+
 export const ProfileUpdateSchema = z.object({
   fullName: safeText(80),
   monthlyIncome: z.number().int().min(0, 'Income cannot be negative.'),

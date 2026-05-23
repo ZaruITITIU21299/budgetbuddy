@@ -1,20 +1,23 @@
 import { useState } from 'react';
-import { Cloud, Eye, EyeOff, HardDrive, Loader2, Lock, Mail, User2, Wand2 } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Lock, Mail, User2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Button, Input } from '@/components/ui';
 import { useAuthStore } from '@/stores';
-import { STORAGE_BACKEND } from '@/lib/storage';
-import { LoginSchema, RegisterSchema } from '@/lib/validation/schemas';
-import { seedDemoAccount, getDemoCredentials } from '@/lib/services/seed';
+import {
+  ForgotPasswordSchema,
+  LoginSchema,
+  RegisterSchema,
+} from '@/lib/validation/schemas';
 import toast from 'react-hot-toast';
 
-type Mode = 'login' | 'register';
+type Mode = 'login' | 'register' | 'forgot';
 
 export default function LoginView() {
   const [mode, setMode] = useState<Mode>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [resetSent, setResetSent] = useState(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,7 +26,13 @@ export default function LoginView() {
 
   const login = useAuthStore((s) => s.login);
   const register = useAuthStore((s) => s.register);
-  const setSession = useAuthStore((s) => s.setSession);
+  const requestPasswordReset = useAuthStore((s) => s.requestPasswordReset);
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setErrors({});
+    setResetSent(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +53,7 @@ export default function LoginView() {
       } finally {
         setSubmitting(false);
       }
-    } else {
+    } else if (mode === 'register') {
       const parsed = RegisterSchema.safeParse({ fullName, email, password, confirmPassword });
       if (!parsed.success) {
         setErrors(toErrors(parsed.error.issues));
@@ -63,21 +72,36 @@ export default function LoginView() {
       } finally {
         setSubmitting(false);
       }
+    } else {
+      const parsed = ForgotPasswordSchema.safeParse({ email });
+      if (!parsed.success) {
+        setErrors(toErrors(parsed.error.issues));
+        return;
+      }
+      setSubmitting(true);
+      try {
+        await requestPasswordReset(parsed.data.email);
+        setResetSent(true);
+        toast.success('Reset link sent — check your inbox.');
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Could not send reset email');
+      } finally {
+        setSubmitting(false);
+      }
     }
   };
 
-  const handleDemo = async () => {
-    setSubmitting(true);
-    try {
-      const session = await seedDemoAccount();
-      await setSession(session);
-      toast.success('Demo account loaded with realistic Vietnamese-student data', { duration: 4000 });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load demo', { duration: 6000 });
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const headline = mode === 'login'
+    ? 'Welcome back'
+    : mode === 'register'
+      ? 'Create your account'
+      : 'Reset your password';
+
+  const subhead = mode === 'login'
+    ? 'Sign in to your account.'
+    : mode === 'register'
+      ? 'Create an account to start tracking your spending.'
+      : 'Enter your email and we\u2019ll send you a link to set a new password.';
 
   return (
     <div className="flex min-h-screen w-full overflow-hidden bg-[#060B1B]">
@@ -133,13 +157,14 @@ export default function LoginView() {
             </div>
           </div>
 
-          <p className="text-xs text-slate-500">VND-native · Mobile-first · Built as a thesis project at International University, VNU-HCMC</p>
+          <p className="text-xs text-slate-500">VND-native · Mobile-first · Built for everyday student life</p>
         </div>
       </div>
 
       {/* Form side */}
       <div className="w-full lg:w-1/2 flex items-center justify-center px-6 py-10 bg-[#0B1224]">
         <motion.div
+          key={mode}
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           className="w-full max-w-md space-y-6"
@@ -152,133 +177,132 @@ export default function LoginView() {
           </div>
 
           <div>
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <h2 className="text-3xl font-bold text-white">
-                {mode === 'login' ? 'Welcome back' : 'Create your account'}
-              </h2>
-              <span
-                className={
-                  STORAGE_BACKEND === 'supabase'
-                    ? 'inline-flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold px-2 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
-                    : 'inline-flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-400'
-                }
-                title={STORAGE_BACKEND === 'supabase'
-                  ? 'Auth + data persist to your Supabase project'
-                  : 'Local mode — data lives only in this browser'}
-              >
-                {STORAGE_BACKEND === 'supabase'
-                  ? (<><Cloud className="size-3" /> Supabase</>)
-                  : (<><HardDrive className="size-3" /> Local</>)}
-              </span>
-            </div>
-            <p className="text-slate-400 mt-1.5">
-              {mode === 'login'
-                ? STORAGE_BACKEND === 'supabase'
-                  ? 'Sign in to your Supabase-backed account.'
-                  : 'Sign in to continue tracking your spending.'
-                : STORAGE_BACKEND === 'supabase'
-                  ? 'A new auth.users row is created in Supabase.'
-                  : 'Free forever — your data stays on this device.'}
-            </p>
+            <h2 className="text-3xl font-bold text-white">{headline}</h2>
+            <p className="text-slate-400 mt-1.5">{subhead}</p>
           </div>
 
-          <form className="space-y-4" onSubmit={handleSubmit}>
-            {mode === 'register' && (
-              <Input
-                label="Full Name"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                leftIcon={<User2 className="size-4" />}
-                placeholder="Nguyễn Thành Tài"
-                error={errors['fullName']}
-              />
-            )}
-            <Input
-              label="Email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              leftIcon={<Mail className="size-4" />}
-              placeholder="you@hcmiu.edu.vn"
-              error={errors['email']}
-              autoComplete={mode === 'login' ? 'username' : 'email'}
-            />
-            <Input
-              label="Password"
-              type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              leftIcon={<Lock className="size-4" />}
-              placeholder={mode === 'login' ? 'Your password' : 'At least 6 characters'}
-              error={errors['password']}
-              rightSlot={
+          {mode === 'forgot' && resetSent ? (
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 space-y-3">
+              <p className="text-sm text-emerald-200">
+                We sent a reset link to <strong>{email}</strong>. Click the link
+                in the email to choose a new password. The link expires in 1
+                hour.
+              </p>
+              <p className="text-xs text-slate-400">
+                Didn&apos;t get it? Check your spam folder, or{' '}
                 <button
                   type="button"
-                  onClick={() => setShowPassword((s) => !s)}
-                  className="text-slate-400 hover:text-white"
+                  onClick={() => setResetSent(false)}
+                  className="font-bold text-emerald-300 hover:text-emerald-200"
                 >
-                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  try a different email
                 </button>
-              }
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            />
-            {mode === 'register' && (
+                .
+              </p>
+              <button
+                type="button"
+                onClick={() => switchMode('login')}
+                className="inline-flex items-center gap-1.5 text-sm font-bold text-emerald-400 hover:text-emerald-300"
+              >
+                <ArrowLeft className="size-4" /> Back to sign in
+              </button>
+            </div>
+          ) : (
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              {mode === 'register' && (
+                <Input
+                  label="Full Name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  leftIcon={<User2 className="size-4" />}
+                  placeholder="Nguyễn Thành Tài"
+                  error={errors['fullName']}
+                />
+              )}
               <Input
-                label="Confirm Password"
-                type={showPassword ? 'text' : 'password'}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                leftIcon={<Lock className="size-4" />}
-                error={errors['confirmPassword']}
+                label="Email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                leftIcon={<Mail className="size-4" />}
+                placeholder="you@email.com"
+                error={errors['email']}
+                autoComplete={mode === 'login' ? 'username' : 'email'}
               />
-            )}
+              {mode !== 'forgot' && (
+                <Input
+                  label="Password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  leftIcon={<Lock className="size-4" />}
+                  placeholder={mode === 'login' ? 'Your password' : 'At least 6 characters'}
+                  error={errors['password']}
+                  rightSlot={
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((s) => !s)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  }
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                />
+              )}
+              {mode === 'register' && (
+                <Input
+                  label="Confirm Password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  leftIcon={<Lock className="size-4" />}
+                  error={errors['confirmPassword']}
+                />
+              )}
 
-            <Button type="submit" loading={submitting} className="w-full" size="lg">
-              {mode === 'login' ? 'Sign In' : 'Create Account'}
-            </Button>
-          </form>
+              {mode === 'login' && (
+                <div className="flex justify-end -mt-1">
+                  <button
+                    type="button"
+                    onClick={() => switchMode('forgot')}
+                    className="text-xs font-semibold text-emerald-400 hover:text-emerald-300"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
 
-          <div className="relative py-2">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-white/5" />
-            </div>
-            <div className="relative flex justify-center">
-              <span className="bg-[#0B1224] px-3 text-[10px] uppercase tracking-widest text-slate-500 font-bold">
-                Or just try the demo
-              </span>
-            </div>
-          </div>
+              <Button type="submit" loading={submitting} className="w-full" size="lg">
+                {mode === 'login'
+                  ? 'Sign In'
+                  : mode === 'register'
+                    ? 'Create Account'
+                    : 'Send Reset Link'}
+              </Button>
+            </form>
+          )}
 
-          <button
-            type="button"
-            onClick={handleDemo}
-            disabled={submitting}
-            className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-violet-500/15 to-emerald-500/15 border border-white/10 hover:border-white/20 text-white font-semibold flex items-center justify-center gap-2.5 transition-all"
-          >
-            {submitting ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4 text-violet-300" />}
-            Continue as Demo User
-          </button>
-          <p className="text-[11px] text-slate-500 text-center -mt-2">
-            Loads a pre-seeded account with {25}+ realistic VND expenses.
-          </p>
-
-          <p className="text-center text-sm text-slate-400">
-            {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
+          {mode === 'forgot' && !resetSent && (
             <button
               type="button"
-              onClick={() => {
-                setMode((m) => (m === 'login' ? 'register' : 'login'));
-                setErrors({});
-              }}
-              className="font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
+              onClick={() => switchMode('login')}
+              className="inline-flex items-center gap-1.5 text-sm font-bold text-emerald-400 hover:text-emerald-300"
             >
-              {mode === 'login' ? 'Sign up' : 'Sign in'}
+              <ArrowLeft className="size-4" /> Back to sign in
             </button>
-          </p>
+          )}
 
-          {mode === 'login' && (
-            <p className="text-center text-[11px] text-slate-600">
-              Demo credentials: <code>{getDemoCredentials().email}</code> · <code>{getDemoCredentials().password}</code>
+          {mode !== 'forgot' && (
+            <p className="text-center text-sm text-slate-400">
+              {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
+              <button
+                type="button"
+                onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}
+                className="font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
+              >
+                {mode === 'login' ? 'Sign up' : 'Sign in'}
+              </button>
             </p>
           )}
         </motion.div>

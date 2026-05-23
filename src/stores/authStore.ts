@@ -6,6 +6,12 @@ interface AuthState {
   session: AuthSession | null;
   profile: ProfileRow | null;
   isHydrated: boolean;
+  /**
+   * True when supabase-js has picked up a `type=recovery` token in the URL.
+   * The app should show a "set new password" screen until the user either
+   * completes the reset (`updatePassword`) or cancels (`cancelRecovery`).
+   */
+  isRecovering: boolean;
   hydrate: () => Promise<void>;
   setSession: (session: AuthSession | null) => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -13,6 +19,9 @@ interface AuthState {
   login: (input: { email: string; password: string }) => Promise<void>;
   register: (input: { email: string; password: string; fullName: string }) => Promise<void>;
   logout: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  updatePassword: (newPassword: string) => Promise<void>;
+  cancelRecovery: () => Promise<void>;
 }
 
 /**
@@ -71,7 +80,19 @@ declare global {
 export const useAuthStore = create<AuthState>((set, get) => {
   if (typeof window !== 'undefined' && !window.__bb_auth_listener_attached) {
     window.__bb_auth_listener_attached = true;
-    AuthRepo.onAuthChange?.((sess) => {
+    AuthRepo.onAuthChange?.((sess, event) => {
+      // Supabase emits PASSWORD_RECOVERY when the user lands on the app via a
+      // reset-password email link. We park them on the recovery screen until
+      // they pick a new password — even if a session is briefly active.
+      if (event === 'PASSWORD_RECOVERY') {
+        set({ isRecovering: true, isHydrated: true });
+        // Strip the access-token hash from the URL so a refresh doesn't
+        // re-trigger the flow.
+        if (typeof window !== 'undefined' && window.location.hash) {
+          history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+        return;
+      }
       if (!sess) {
         set({ session: null, profile: null });
         return;
@@ -88,6 +109,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     session: null,
     profile: null,
     isHydrated: false,
+    isRecovering: false,
 
     hydrate: async () => {
       // Hard safety net — never let the app sit on "Loading…" forever, even
@@ -161,7 +183,26 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     logout: async () => {
       await AuthRepo.logout();
-      set({ session: null, profile: null });
+      set({ session: null, profile: null, isRecovering: false });
+    },
+
+    requestPasswordReset: async (email) => {
+      const redirectTo =
+        typeof window !== 'undefined' ? window.location.origin : undefined;
+      await AuthRepo.requestPasswordReset?.(email, redirectTo);
+    },
+
+    updatePassword: async (newPassword) => {
+      await AuthRepo.updatePassword?.(newPassword);
+      // Force a fresh login after the reset so the new password takes effect
+      // cleanly across tabs and the recovery session is invalidated.
+      await AuthRepo.logout();
+      set({ session: null, profile: null, isRecovering: false });
+    },
+
+    cancelRecovery: async () => {
+      await AuthRepo.logout();
+      set({ session: null, profile: null, isRecovering: false });
     },
   };
 });

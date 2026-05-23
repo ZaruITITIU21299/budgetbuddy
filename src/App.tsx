@@ -7,6 +7,7 @@ import {
 import { useRealtime } from '@/hooks';
 import Sidebar from '@/components/Sidebar';
 import LoginView from '@/components/LoginView';
+import ResetPasswordView from '@/components/ResetPasswordView';
 import DashboardView from '@/components/DashboardView';
 import ExpensesView from '@/components/ExpensesView';
 import GroupsView from '@/components/GroupsView';
@@ -26,11 +27,29 @@ import { MonthlyBudgetSetupModal } from '@/components/expense/MonthlyBudgetSetup
 import { ExportModal } from '@/components/expense/ExportModal';
 import { OnboardingFlow } from '@/components/layout/OnboardingFlow';
 
+const PUBLIC_TOASTER = (
+  <Toaster
+    position="top-center"
+    toastOptions={{
+      style: {
+        background: '#0B1224',
+        color: '#fff',
+        border: '1px solid rgba(148,163,184,0.15)',
+        fontSize: '13px',
+        borderRadius: '12px',
+      },
+      success: { iconTheme: { primary: '#10B981', secondary: '#0B1224' } },
+      error: { iconTheme: { primary: '#F43F5E', secondary: '#0B1224' } },
+    }}
+  />
+);
+
 export default function App() {
   const hydrate = useAuthStore((s) => s.hydrate);
   const isHydrated = useAuthStore((s) => s.isHydrated);
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
+  const isRecovering = useAuthStore((s) => s.isRecovering);
 
   useEffect(() => {
     void hydrate();
@@ -44,24 +63,23 @@ export default function App() {
     );
   }
 
+  // Password-recovery flow takes precedence over any active session — the
+  // user must finish setting a new password (or cancel) before doing anything
+  // else.
+  if (isRecovering) {
+    return (
+      <ErrorBoundary>
+        <ResetPasswordView />
+        {PUBLIC_TOASTER}
+      </ErrorBoundary>
+    );
+  }
+
   if (!session || !profile) {
     return (
       <ErrorBoundary>
         <LoginView />
-        <Toaster
-          position="top-center"
-          toastOptions={{
-            style: {
-              background: '#0B1224',
-              color: '#fff',
-              border: '1px solid rgba(148,163,184,0.15)',
-              fontSize: '13px',
-              borderRadius: '12px',
-            },
-            success: { iconTheme: { primary: '#10B981', secondary: '#0B1224' } },
-            error: { iconTheme: { primary: '#F43F5E', secondary: '#0B1224' } },
-          }}
-        />
+        {PUBLIC_TOASTER}
       </ErrorBoundary>
     );
   }
