@@ -31,7 +31,20 @@ import type {
 
 // ---------- shared helpers ----------
 
-function fail(scope: string, error: { message: string } | null): never {
+function fail(
+  scope: string,
+  error: { message: string; code?: string; details?: string | null; hint?: string | null } | null,
+): never {
+  // Dump everything Supabase gave us — message alone often hides the real
+  // cause (e.g. PostgREST returns `code: '42501'` for RLS violations and a
+  // `details` field with the failing row).
+  console.error(`[supabase:${scope}]`, {
+    message: error?.message,
+    code: error?.code,
+    details: error?.details,
+    hint: error?.hint,
+    raw: error,
+  });
   throw new Error(`[supabase:${scope}] ${error?.message ?? 'unknown error'}`);
 }
 
@@ -244,14 +257,26 @@ export const SupabaseGroupsRepo = {
   },
 
   async create(input: { name: string; description?: string; createdBy: string; avatarUrl?: string }): Promise<GroupRow> {
-    // invite_code is set by the default in the schema (substr(md5(random()::text), 1, 8))
+    // Source-of-truth for the inserter is `auth.uid()` on the server — fetch
+    // it freshly here instead of trusting the store's cached `createdBy`. If
+    // the JWT has silently expired the call would otherwise fail RLS with a
+    // confusing "row violates policy" message.
+    const { data: userData, error: userErr } = await supabase().auth.getUser();
+    if (userErr || !userData.user) {
+      throw new Error('Your session expired. Please sign in again to create a group.');
+    }
+    const uid = userData.user.id;
+
+    // We send `created_by` explicitly (matches `auth.uid()` from above) so
+    // the insert succeeds even if the server-side DEFAULT auth.uid() wasn't
+    // applied to the column.
     const { data, error } = await supabase()
       .from('groups')
       .insert({
         name: input.name,
         description: input.description ?? null,
         avatar_url: input.avatarUrl ?? null,
-        created_by: input.createdBy,
+        created_by: uid,
       })
       .select()
       .single();
@@ -260,7 +285,7 @@ export const SupabaseGroupsRepo = {
     // Add the creator as an admin member.
     const { error: memberErr } = await supabase()
       .from('group_members')
-      .insert({ group_id: data.id, user_id: input.createdBy, role: 'admin' });
+      .insert({ group_id: data.id, user_id: uid, role: 'admin' });
     if (memberErr) fail('groups.create.member', memberErr);
 
     return data;
