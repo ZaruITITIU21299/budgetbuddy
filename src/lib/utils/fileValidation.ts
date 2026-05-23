@@ -28,3 +28,13 @@ export function readFileAsDataURL(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+/**
+ * Read a File as raw base64 (no `data:...;base64,` prefix).
+ * Useful for APIs that want bytes only — e.g. Gemini's `inline_data.data`.
+ */
+export async function readFileAsBase64(file: File): Promise<string> {
+  const dataUrl = await readFileAsDataURL(file);
+  const commaIdx = dataUrl.indexOf(',');
+  return commaIdx === -1 ? dataUrl : dataUrl.slice(commaIdx + 1);
+}

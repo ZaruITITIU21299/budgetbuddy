@@ -8,6 +8,7 @@ import type {
 } from '@/types';
 import type { AIClient, CategorizationResult } from './aiClient';
 import { formatVND } from '@/lib/utils';
+import { runOCR } from './ocr';
 
 /**
  * Deterministic keyword-based AI. Designed so that thesis evaluation has a
@@ -220,6 +221,16 @@ export class MockAIClient implements AIClient {
       confidence,
       reasoning: `Based on a daily average of ${formatVND(Math.round(dailyAvg))} over the first ${input.daysElapsed} day(s), blended with last ${input.history.length} month(s) of history.`,
     };
+  }
+
+  /**
+   * Mock vision call — runs the mock OCR pipeline and then the text parser.
+   * Lets `ReceiptScannerModal` always call `parseReceiptImage(file)` without
+   * branching on the active client.
+   */
+  async parseReceiptImage(file: File): Promise<ParsedReceipt> {
+    const text = await runOCR(file);
+    return this.parseReceiptText(text);
   }
 
   async parseReceiptText(ocrText: string): Promise<ParsedReceipt> {

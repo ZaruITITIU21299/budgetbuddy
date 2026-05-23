@@ -25,4 +25,9 @@ export interface AIClient {
   generateInsights(input: { current: MonthlySummary; previous?: MonthlySummary }): Promise<InsightItem[]>;
   predictMonthlyBudget(input: { history: MonthlyHistory[]; currentMonth: MonthlySummary; daysElapsed: number; daysInMonth: number }): Promise<BudgetPrediction>;
   parseReceiptText(ocrText: string): Promise<ParsedReceipt>;
+  /**
+   * Extract structured receipt fields directly from an image/PDF file using a
+   * vision-capable model. Avoids the OCR → text-parse round trip.
+   */
+  parseReceiptImage(file: File): Promise<ParsedReceipt>;
 }

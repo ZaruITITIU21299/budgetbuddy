@@ -8,12 +8,18 @@ import type {
 } from '@/types';
 import type { AIClient, CategorizationResult } from './aiClient';
 import { EXPENSE_CATEGORIES } from '@/types';
+import { readFileAsBase64 } from '@/lib/utils';
 import {
   BUDGET_FORECAST_PROMPT,
   CATEGORIZE_PROMPT,
   INSIGHTS_PROMPT,
   RECEIPT_PARSE_PROMPT,
+  RECEIPT_VISION_PROMPT,
 } from './prompts';
+
+type GeminiPart =
+  | { text: string }
+  | { inline_data: { mime_type: string; data: string } };
 
 /**
  * Real Google Gemini client. Opt-in via env (`VITE_USE_REAL_AI=true`).
@@ -41,9 +47,9 @@ export class GeminiAIClient implements AIClient {
   }
 
   async categorize(input: { title: string; amount: number; note?: string }): Promise<CategorizationResult> {
-    const json = await this.call(
-      `${CATEGORIZE_PROMPT}\n\nInput:\n${JSON.stringify(input)}`,
-    );
+    const json = await this.call([
+      { text: `${CATEGORIZE_PROMPT}\n\nInput:\n${JSON.stringify(input)}` },
+    ]);
     const parsed = safeJSONParse<{ category: string; confidence: number; reasoning: string }>(json);
     const cat = (parsed?.category ?? 'other') as ExpenseCategory;
     return {
@@ -54,7 +60,7 @@ export class GeminiAIClient implements AIClient {
   }
 
   async generateInsights(input: { current: MonthlySummary; previous?: MonthlySummary }): Promise<InsightItem[]> {
-    const json = await this.call(`${INSIGHTS_PROMPT}\n\nData:\n${JSON.stringify(input)}`);
+    const json = await this.call([{ text: `${INSIGHTS_PROMPT}\n\nData:\n${JSON.stringify(input)}` }]);
     const parsed = safeJSONParse<InsightItem[]>(json);
     return Array.isArray(parsed) ? parsed.slice(0, 3) : [];
   }
@@ -65,7 +71,7 @@ export class GeminiAIClient implements AIClient {
     daysElapsed: number;
     daysInMonth: number;
   }): Promise<BudgetPrediction> {
-    const json = await this.call(`${BUDGET_FORECAST_PROMPT}\n\nData:\n${JSON.stringify(input)}`);
+    const json = await this.call([{ text: `${BUDGET_FORECAST_PROMPT}\n\nData:\n${JSON.stringify(input)}` }]);
     const parsed = safeJSONParse<BudgetPrediction>(json);
     return (
       parsed ?? {
@@ -77,25 +83,29 @@ export class GeminiAIClient implements AIClient {
   }
 
   async parseReceiptText(ocrText: string): Promise<ParsedReceipt> {
-    const json = await this.call(`${RECEIPT_PARSE_PROMPT}\n\nReceipt OCR:\n${ocrText}`);
+    const json = await this.call([{ text: `${RECEIPT_PARSE_PROMPT}\n\nReceipt OCR:\n${ocrText}` }]);
     const parsed = safeJSONParse<ParsedReceipt>(json);
-    return (
-      parsed ?? {
-        merchant: null,
-        date: null,
-        total: null,
-        items: [],
-        categoryHint: null,
-      }
-    );
+    return normalizeParsedReceipt(parsed);
   }
 
-  private async call(prompt: string): Promise<string> {
+  async parseReceiptImage(file: File): Promise<ParsedReceipt> {
+    const data = await readFileAsBase64(file);
+    // Gemini accepts image/* and application/pdf via inline_data.
+    const mimeType = file.type || 'image/jpeg';
+    const json = await this.call([
+      { text: RECEIPT_VISION_PROMPT },
+      { inline_data: { mime_type: mimeType, data } },
+    ]);
+    const parsed = safeJSONParse<ParsedReceipt>(json);
+    return normalizeParsedReceipt(parsed);
+  }
+
+  private async call(parts: GeminiPart[]): Promise<string> {
     const res = await fetch(`${this.endpoint}?key=${encodeURIComponent(this.apiKey)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts }],
         generationConfig: { response_mime_type: 'application/json', temperature: 0.2 },
       }),
     });
@@ -106,6 +116,46 @@ export class GeminiAIClient implements AIClient {
     const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
   }
+}
+
+function normalizeParsedReceipt(parsed: unknown): ParsedReceipt {
+  const empty: ParsedReceipt = {
+    merchant: null,
+    date: null,
+    total: null,
+    items: [],
+    categoryHint: null,
+  };
+  if (!parsed || typeof parsed !== 'object') return empty;
+
+  // Accept both `categoryHint` (camelCase) and `category_hint` (snake_case)
+  // since prompts have shipped with both at various points.
+  const obj = parsed as Record<string, unknown> & {
+    items?: Array<{ name?: unknown; price?: unknown }>;
+  };
+  const hintRaw = (obj['categoryHint'] ?? obj['category_hint']) as string | null | undefined;
+  const hint =
+    hintRaw && (EXPENSE_CATEGORIES as readonly string[]).includes(hintRaw)
+      ? (hintRaw as ExpenseCategory)
+      : null;
+
+  const items = Array.isArray(obj.items)
+    ? obj.items
+        .map((it) => ({
+          name: typeof it.name === 'string' ? it.name : '',
+          price: typeof it.price === 'number' ? it.price : Number(it.price) || 0,
+        }))
+        .filter((it) => it.name && it.price > 0)
+        .slice(0, 20)
+    : [];
+
+  return {
+    merchant: typeof obj.merchant === 'string' ? obj.merchant : null,
+    date: typeof obj.date === 'string' ? obj.date : null,
+    total: typeof obj.total === 'number' ? obj.total : null,
+    items,
+    categoryHint: hint,
+  };
 }
 
 function safeJSONParse<T>(value: string): T | null {

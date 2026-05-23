@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { Camera, FileImage, Loader2, RefreshCcw, Upload } from 'lucide-react';
 import { Modal, Button, Input, CategoryPill } from '@/components/ui';
 import { useUIStore, useAuthStore } from '@/stores';
-import { runOCR, getAIClient } from '@/lib/ai';
+import { getAIClient } from '@/lib/ai';
 import { ReceiptStorage } from '@/lib/storage';
-import { validateReceiptFile, readFileAsDataURL, formatVND, parseVNDInput, cn } from '@/lib/utils';
+import { validateReceiptFile, readFileAsDataURL, formatVND, parseVNDInput } from '@/lib/utils';
 import type { ParsedReceipt } from '@/types';
 import toast from 'react-hot-toast';
 
@@ -16,9 +16,8 @@ export function ReceiptScannerModal() {
 
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [status, setStatus] = useState<'idle' | 'ocr' | 'parsing' | 'done'>('idle');
+  const [status, setStatus] = useState<'idle' | 'analyzing' | 'done'>('idle');
   const [parsed, setParsed] = useState<ParsedReceipt | null>(null);
-  const [rawText, setRawText] = useState<string>('');
   const [editedTotal, setEditedTotal] = useState<number>(0);
   const [uploading, setUploading] = useState(false);
 
@@ -29,7 +28,6 @@ export function ReceiptScannerModal() {
     setPreview(null);
     setStatus('idle');
     setParsed(null);
-    setRawText('');
     setEditedTotal(0);
   };
 
@@ -41,17 +39,16 @@ export function ReceiptScannerModal() {
     }
     setFile(f);
     setPreview(await readFileAsDataURL(f));
-    setStatus('ocr');
+    setStatus('analyzing');
     try {
-      const text = await runOCR(f);
-      setRawText(text);
-      setStatus('parsing');
-      const result = await getAIClient().parseReceiptText(text);
+      // Single vision call — Gemini reads the image and returns structured
+      // fields. MockAIClient falls back to a deterministic OCR + text parser.
+      const result = await getAIClient().parseReceiptImage(f);
       setParsed(result);
       setEditedTotal(result.total ?? 0);
       setStatus('done');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'OCR failed');
+      toast.error(e instanceof Error ? e.message : 'Receipt scan failed');
       setStatus('idle');
     }
   };
@@ -162,10 +159,10 @@ export function ReceiptScannerModal() {
               </div>
             )}
             <div className="space-y-3">
-              {(status === 'ocr' || status === 'parsing') && (
+              {status === 'analyzing' && (
                 <div className="flex items-center gap-2 text-sm text-slate-300">
                   <Loader2 className="size-4 animate-spin text-emerald-300" />
-                  {status === 'ocr' ? 'Reading text from receipt…' : 'Parsing structured fields…'}
+                  Analysing receipt with AI vision…
                 </div>
               )}
 
@@ -209,12 +206,6 @@ export function ReceiptScannerModal() {
                           </li>
                         ))}
                       </ul>
-                    </details>
-                  )}
-                  {rawText && (
-                    <details className="rounded-xl bg-white/[0.02] border border-white/5 px-3 py-2">
-                      <summary className="text-xs font-semibold text-slate-300 cursor-pointer">Raw OCR text</summary>
-                      <pre className={cn('mt-2 text-[11px] text-slate-400 whitespace-pre-wrap font-mono leading-relaxed')}>{rawText}</pre>
                     </details>
                   )}
                 </>
